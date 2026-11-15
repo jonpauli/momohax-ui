@@ -674,7 +674,7 @@ function Lib:Slider(sec, opts)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			dragging = false
 		end
-	end))
+	end));
 	(opts.Scope or Lib):AddInputChanged(function(input)
 		if not dragging then return end
 		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
