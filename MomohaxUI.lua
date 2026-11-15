@@ -1,7 +1,6 @@
 --[[
-	Momohax UI Library - 1:1 interface recreation
-	USAGE: LocalScript in StarterPlayerScripts (or runfile in an executor).
-	Interface only: no gameplay automation, no exploit execution, no AC bypass.
+	Momohax UI Library - 1:1 interface recreation (fixed)
+	USAGE: paste into executor and run.
 ]]
 
 local Players          = game:GetService("Players")
@@ -43,7 +42,15 @@ local function New(class, props, children)
 	end
 	local parent = nil
 	for k, v in pairs(props or {}) do
-		if k == "Parent" then parent = v else inst[k] = v end
+		if k == "Parent" then
+			parent = v
+		else
+			-- FIX: wrap bare numbers for UDim padding properties
+			if (k == "PaddingLeft" or k == "PaddingRight" or k == "PaddingTop" or k == "PaddingBottom") and type(v) == "number" then
+				v = UDim.new(0, v)
+			end
+			inst[k] = v
+		end
 	end
 	inst.Parent = parent
 	return inst
@@ -134,7 +141,7 @@ Lib.Flags = Clone(Lib.Defaults)
 Lib.Flags.Misc.LastSaved = os.date("%d/%m/%Y")
 Lib.FlagTables = { Lib.Flags.Aimbot, Lib.Flags.Triggerbot, Lib.Flags.Visuals, Lib.Flags.Misc, Lib.Flags.Binds, Lib.Flags.Settings }
 
--- merge (preserves table references so watchers stay valid) ---------------
+-- merge -------------------------------------------------------------------
 local function MergeInto(cur, def)
 	for k, v in pairs(def) do
 		local cv = cur[k]
@@ -196,7 +203,7 @@ local function RunAppliers()
 end
 Lib.RunAppliers = RunAppliers
 
--- scopes (for rebuildable control groups) ---------------------------------
+-- scopes ------------------------------------------------------------------
 function Lib:NewScope()
 	local scope = { Conns = {}, Dead = false }
 	function scope.Connect(_, signal, fn)
@@ -318,7 +325,6 @@ function Lib.CloseDropdowns()
 	end
 end
 
--- routes a UIS.InputChanged connection to the global registry or a scope
 function Lib:AddInputChanged(fn, scope)
 	if scope then
 		return scope:Connect(UserInputService.InputChanged, fn)
@@ -326,7 +332,7 @@ function Lib:AddInputChanged(fn, scope)
 	return BindConn(UserInputService.InputChanged:Connect(fn))
 end
 
--- scale / mouse helpers ---------------------------------------------------
+-- scale / mouse -----------------------------------------------------------
 local function AppliedScale()
 	return Lib.BaseScale * ((Lib.Flags.Settings.UIScale or 100) / 100)
 end
@@ -449,6 +455,13 @@ local function GearGlyph(parent)
 	GlyphBar(parent, UDim2.new(1, 0, 0.5, 0), UDim2.fromOffset(2, 1), 0, Vector2.new(1, 0.5))
 end
 
+-- FIX: helper to normalise bind tables from positional {t, k} to named {t=t, k=k}
+local function NormBind(b)
+	if b == nil then return nil end
+	if b.t ~= nil or b.k ~= nil then return b end   -- already named
+	return { t = b[1], k = b[2] }
+end
+
 -- sections ----------------------------------------------------------------
 function Lib:Section(parent, title, plain)
 	local sec = LO(New("Frame", {
@@ -482,13 +495,16 @@ function Lib:Section(parent, title, plain)
 		Position = UDim2.fromOffset(0, plain and 0 or 15), Parent = sec,
 	})
 	New("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder, Parent = body })
-	New("UIPadding", { PaddingLeft = 3, PaddingRight = 3, PaddingTop = 2, PaddingBottom = 1, Parent = body })
+	New("UIPadding", {
+		PaddingLeft = UDim.new(0, 3), PaddingRight = UDim.new(0, 3),
+		PaddingTop = UDim.new(0, 2), PaddingBottom = UDim.new(0, 1), Parent = body
+	})
 	return { Frame = sec, Body = body }
 end
 
 -- toggles -----------------------------------------------------------------
 function Lib:Toggle(sec, opts)
-	local bind = opts.Bind
+	local bind = NormBind(opts.Bind)
 	local row = LO(New("TextButton", {
 		AutoButtonColor = false, Text = "", BackgroundTransparency = 1,
 		Size = UDim2.new(1, 0, 0, 13), Parent = sec.Body,
@@ -512,19 +528,20 @@ function Lib:Toggle(sec, opts)
 
 	local right = (opts.Swatch and 15 or 0) + (opts.Cog and 15 or 0)
 	if opts.Keybind then
-		Lib:Keybind(row, { Bind = opts.Keybind, TextSize = 10, Height = 13, Offset = right })
+		Lib:Keybind(row, { Bind = NormBind(opts.Keybind), TextSize = 10, Height = 13, Offset = right })
 	end
 	if opts.Cog then
+		local cogBind = NormBind(opts.Cog)
 		local cog = LO(New("TextButton", {
 			AutoButtonColor = false, Text = "", BackgroundTransparency = 1,
 			Size = UDim2.fromOffset(11, 11), AnchorPoint = Vector2.new(1, 0.5),
 			Position = UDim2.new(1, -(opts.Swatch and 15 or 1), 0.5, 0), Parent = row,
 		}))
 		GearGlyph(cog)
-		cog.Activated:Connect(function() Lib:OpenColorPicker(opts.Cog, opts.Text .. " Color", cog) end)
+		cog.Activated:Connect(function() Lib:OpenColorPicker(cogBind, opts.Text .. " Color", cog) end)
 	end
 	if opts.Swatch then
-		Lib:ColorSwatch(row, { Bind = opts.Swatch, Title = opts.SwatchTitle or (opts.Text .. " Color"), Offset = 1, Size = 10 })
+		Lib:ColorSwatch(row, { Bind = NormBind(opts.Swatch), Title = opts.SwatchTitle or (opts.Text .. " Color"), Offset = 1, Size = 10 })
 	end
 	if opts.RightTag then
 		RegisterTheme(Text({
@@ -558,7 +575,7 @@ end
 
 -- keybinds ----------------------------------------------------------------
 function Lib:Keybind(parent, opts)
-	local bind = opts.Bind
+	local bind = NormBind(opts.Bind)
 	local btn = LO(New("TextButton", {
 		AutoButtonColor = false, Text = "", BackgroundTransparency = 1,
 		Size = UDim2.fromOffset(opts.Width or 34, opts.Height or 13),
@@ -618,7 +635,7 @@ end
 
 -- sliders -----------------------------------------------------------------
 function Lib:Slider(sec, opts)
-	local bind = opts.Bind
+	local bind = NormBind(opts.Bind)
 	local min, max = opts.Min or 0, opts.Max or 100
 	local step = opts.Step or 1
 	local block = Row(sec.Body, 25)
@@ -696,7 +713,8 @@ function Lib:Slider(sec, opts)
 end
 
 function Lib:RangeSlider(sec, opts)
-	local bmin, bmax = opts.BindMin, opts.BindMax
+	local bmin = NormBind(opts.BindMin)
+	local bmax = NormBind(opts.BindMax)
 	local min, max = opts.Min or 0, opts.Max or 100
 	local block = Row(sec.Body, 25)
 	RegisterTheme(Text({
@@ -742,7 +760,7 @@ function Lib:RangeSlider(sec, opts)
 		hB.Position = UDim2.new(fb, 0, 0.5, 0)
 		val.Text = Fmt(a) .. " - " .. Fmt(b)
 	end
-	local dragging = nil -- "min" | "max"
+	local dragging = nil
 	holder.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			local f = math.clamp((input.Position.X - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
@@ -756,7 +774,7 @@ function Lib:RangeSlider(sec, opts)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			dragging = nil
 		end
-	end))
+	end));
 	(opts.Scope or Lib):AddInputChanged(function(input)
 		if not dragging then return end
 		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
@@ -777,7 +795,7 @@ end
 
 -- dropdowns ---------------------------------------------------------------
 function Lib:Dropdown(sec, opts)
-	local bind = opts.Bind
+	local bind = NormBind(opts.Bind)
 	local hasLabel = opts.Label ~= nil
 	local block = Row(sec.Body, hasLabel and 31 or 18)
 	if hasLabel then
@@ -852,7 +870,7 @@ function Lib:Dropdown(sec, opts)
 		local lst = New("UIStroke", { Thickness = 1, Parent = list })
 		RegisterTheme(lst, "Color", "Border")
 		New("UIListLayout", { Padding = UDim.new(0, 1), SortOrder = Enum.SortOrder.LayoutOrder, Parent = list })
-		New("UIPadding", { PaddingTop = 2, PaddingBottom = 2, Parent = list })
+		New("UIPadding", { PaddingTop = UDim.new(0, 2), PaddingBottom = UDim.new(0, 2), Parent = list })
 		for i, v in ipairs(opts.Values) do
 			local isSel
 			if opts.Multi and type(bind.t[bind.k]) == "table" then
@@ -919,7 +937,7 @@ end
 
 -- list boxes --------------------------------------------------------------
 function Lib:ListBox(sec, opts)
-	local bind = opts.Bind
+	local bind = NormBind(opts.Bind)
 	local container = RegisterTheme(New("Frame", {
 		BackgroundColor3 = RGB(0, 0, 0), BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, opts.Height or 52),
 		Parent = sec.Body,
@@ -933,7 +951,10 @@ function Lib:ListBox(sec, opts)
 		ScrollingDirection = Enum.ScrollingDirection.Y, Parent = container,
 	})
 	New("UIListLayout", { Padding = UDim.new(0, 0), SortOrder = Enum.SortOrder.LayoutOrder, Parent = list })
-	New("UIPadding", { PaddingLeft = 3, PaddingRight = 4, PaddingTop = 2, PaddingBottom = 2, Parent = list })
+	New("UIPadding", {
+		PaddingLeft = UDim.new(0, 3), PaddingRight = UDim.new(0, 4),
+		PaddingTop = UDim.new(0, 2), PaddingBottom = UDim.new(0, 2), Parent = list
+	})
 	local function Render()
 		for _, child in ipairs(list:GetChildren()) do
 			if child:IsA("TextButton") then
@@ -971,7 +992,7 @@ end
 
 -- color swatch ------------------------------------------------------------
 function Lib:ColorSwatch(parent, opts)
-	local bind = opts.Bind
+	local bind = NormBind(opts.Bind)
 	local sz = opts.Size or 12
 	local btn = LO(New("TextButton", {
 		AutoButtonColor = false, Text = "", BackgroundTransparency = 1,
@@ -991,13 +1012,15 @@ function Lib:ColorSwatch(parent, opts)
 	end
 	btn.Activated:Connect(function()
 		local P = Lib.Picker
-		if P.Root and P.Root.Visible and P.Target and P.Target.t == bind.t and P.Target.k == bind.k then
+		if P and P.Root and P.Root.Visible and P.Target and P.Target.t == bind.t and P.Target.k == bind.k then
 			Lib:ClosePicker()
 		else
 			Lib:OpenColorPicker(bind, opts.Title or "Color", btn)
 		end
 	end)
-	Watch(bind.t[bind.k], Render)
+	if bind and bind.t and bind.t[bind.k] then
+		Watch(bind.t[bind.k], Render)
+	end
 	RegisterApplier(Render)
 	Render()
 	return btn
@@ -1005,7 +1028,7 @@ end
 
 -- text boxes --------------------------------------------------------------
 function Lib:TextBox(sec, opts)
-	local bind = opts.Bind
+	local bind = NormBind(opts.Bind)
 	local hasLabel = opts.Label ~= nil
 	local block = Row(sec.Body, hasLabel and 31 or 16)
 	if hasLabel then
@@ -1023,7 +1046,7 @@ function Lib:TextBox(sec, opts)
 		PlaceholderColor3 = Lib.Theme.TextFaint, TextColor3 = Lib.Theme.Text,
 		ClearTextOnFocus = false, ClipsDescendants = true, Parent = block,
 	}), "BackgroundColor3", "Box")
-	New("UIPadding", { PaddingLeft = 5, Parent = box })
+	New("UIPadding", { PaddingLeft = UDim.new(0, 5), Parent = box })
 	local bst = New("UIStroke", { Thickness = 1, Parent = box })
 	RegisterTheme(bst, "Color", "Border")
 	RegisterTheme(box, "TextColor3", "Text")
@@ -1067,8 +1090,8 @@ function Lib:ButtonRow(sec, defs, height)
 	for i, def in ipairs(defs) do
 		Lib:Button(row, {
 			Text = def.Text,
-			Position = UDim2.new((i - 1) * w, (i - 1) * gap, 0, 0),
-			Size = UDim2.new(w, -gap, 1, 0),
+			Position = UDim2.new((i - 1) * w / 100, (i - 1) * gap, 0, 0),
+			Size = UDim2.new(w / 100, -gap, 1, 0),
 			OnClick = def.OnClick,
 		})
 	end
@@ -1094,6 +1117,7 @@ end
 
 -- misc rows ---------------------------------------------------------------
 function Lib:KeybindRow(sec, text, bind)
+	bind = NormBind(bind)
 	local row = Row(sec.Body, 13)
 	RegisterTheme(Text({
 		BackgroundTransparency = 1, Size = UDim2.new(1, -40, 1, 0), TextSize = 11,
@@ -1104,6 +1128,7 @@ function Lib:KeybindRow(sec, text, bind)
 end
 
 function Lib:ColorRow(sec, text, bind, title)
+	bind = NormBind(bind)
 	local row = Row(sec.Body, 13)
 	RegisterTheme(Text({
 		BackgroundTransparency = 1, Size = UDim2.new(1, -20, 1, 0), TextSize = 11,
@@ -1149,7 +1174,10 @@ local function Column(page, x, w)
 		ScrollingDirection = Enum.ScrollingDirection.Y, Parent = page,
 	}))
 	New("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder, Parent = col })
-	New("UIPadding", { PaddingLeft = 4, PaddingRight = 4, PaddingTop = 0, PaddingBottom = 6, Parent = col })
+	New("UIPadding", {
+		PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 4),
+		PaddingTop = UDim.new(0, 0), PaddingBottom = UDim.new(0, 6), Parent = col
+	})
 	return col
 end
 
@@ -1258,70 +1286,68 @@ local function BuildCombatPage(page)
 	local colR = Column(page, 204, 212)
 
 	local secA = Lib:Section(colL, "Aimbot")
-	Lib:Toggle(secA, { Text = "Enabled", Bind = { F.Aimbot, "Enabled" }, Keybind = { t = F.Aimbot, k = "Key" } })
-	Lib:Toggle(secA, { Text = "Silent Aim", Bind = { F.Aimbot, "SilentAim" }, Keybind = { t = F.Aimbot, k = "SilentKey" } })
-	Lib:Toggle(secA, { Text = "Show Fov", Bind = { F.Aimbot, "ShowFov" }, Swatch = { t = F.Aimbot, k = "FovColor" }, SwatchTitle = "FOV Color" })
-	Lib:Toggle(secA, { Text = "Auto Fire", Bind = { F.Aimbot, "AutoFire" } })
-	Lib:Slider(secA, { Label = "Field Of View", Min = 5, Max = 250, Bind = { F.Aimbot, "FOV" } })
-	Lib:Slider(secA, { Label = "Smoothness", Min = 0, Max = 100, Bind = { F.Aimbot, "Smoothness" }, Suffix = "%" })
-	Lib:Dropdown(secA, { Label = "Hit Part", Values = { "Head", "Torso", "Arms", "Legs", "Feet" }, Multi = true, Bind = { F.Aimbot, "HitPart" } })
-	Lib:Dropdown(secA, { Label = "Priority", Values = { "Lowest Health", "Closest", "Distance" }, Bind = { F.Aimbot, "Priority" } })
+	Lib:Toggle(secA, { Text = "Enabled",   Bind = { t=F.Aimbot, k="Enabled" },   Keybind = { t=F.Aimbot, k="Key" } })
+	Lib:Toggle(secA, { Text = "Silent Aim", Bind = { t=F.Aimbot, k="SilentAim" }, Keybind = { t=F.Aimbot, k="SilentKey" } })
+	Lib:Toggle(secA, { Text = "Show Fov",  Bind = { t=F.Aimbot, k="ShowFov" },   Swatch = { t=F.Aimbot, k="FovColor" }, SwatchTitle = "FOV Color" })
+	Lib:Toggle(secA, { Text = "Auto Fire", Bind = { t=F.Aimbot, k="AutoFire" } })
+	Lib:Slider(secA, { Label = "Field Of View", Min = 5, Max = 250, Bind = { t=F.Aimbot, k="FOV" } })
+	Lib:Slider(secA, { Label = "Smoothness",    Min = 0, Max = 100, Bind = { t=F.Aimbot, k="Smoothness" }, Suffix = "%" })
+	Lib:Dropdown(secA, { Label = "Hit Part", Values = { "Head","Torso","Arms","Legs","Feet" }, Multi = true, Bind = { t=F.Aimbot, k="HitPart" } })
+	Lib:Dropdown(secA, { Label = "Priority", Values = { "Lowest Health","Closest","Distance" }, Bind = { t=F.Aimbot, k="Priority" } })
 
 	local secT = Lib:Section(colL, "Triggerbot")
-	Lib:Toggle(secT, { Text = "Enabled", Bind = { F.Triggerbot, "Enabled" }, Keybind = { t = F.Triggerbot, k = "Key" } })
-	Lib:Slider(secT, { Label = "Delay", Min = 0, Max = 500, Bind = { F.Triggerbot, "Delay" }, Suffix = "ms" })
-	Lib:RangeSlider(secT, { Label = "Reaction Time", Min = 10, Max = 400, BindMin = { F.Triggerbot, "ReactionMin" }, BindMax = { F.Triggerbot, "ReactionMax" }, Suffix = "ms" })
-	Lib:ListBox(secT, { Values = { "Arms", "Legs", "Feet" }, Bind = { F.Triggerbot, "Parts" }, Height = 52 })
+	Lib:Toggle(secT, { Text = "Enabled", Bind = { t=F.Triggerbot, k="Enabled" }, Keybind = { t=F.Triggerbot, k="Key" } })
+	Lib:Slider(secT, { Label = "Delay", Min = 0, Max = 500, Bind = { t=F.Triggerbot, k="Delay" }, Suffix = "ms" })
+	Lib:RangeSlider(secT, { Label = "Reaction Time", Min = 10, Max = 400, BindMin = { t=F.Triggerbot, k="ReactionMin" }, BindMax = { t=F.Triggerbot, k="ReactionMax" }, Suffix = "ms" })
+	Lib:ListBox(secT, { Values = { "Arms","Legs","Feet" }, Bind = { t=F.Triggerbot, k="Parts" }, Height = 52 })
 
 	Lib.BuildVisualsSection(colR)
 	Lib.BuildMiscSection(colR)
 end
 
--- visuals section (shared: combat page right column + visuals tab) --------
 function Lib.BuildVisualsSection(parent)
 	local F = Lib.Flags
 	local sec = Lib:Section(parent, "Visuals")
-	Lib:Toggle(sec, { Text = "Boxes", Bind = { F.Visuals, "Boxes" }, Cog = { t = F.Visuals, k = "FillColor" }, Swatch = { t = F.Visuals, k = "FillColor" }, SwatchTitle = "Fill Color" })
-	Lib:Toggle(sec, { Text = "Names", Bind = { F.Visuals, "Names" }, Keybind = { t = F.Visuals, k = "NamesKey" } })
-	Lib:Toggle(sec, { Text = "Health Bar", Bind = { F.Visuals, "HealthBar" }, Swatch = { t = F.Visuals, k = "HealthColor" }, SwatchTitle = "Health Bar Color" })
-	Lib:Toggle(sec, { Text = "Chams", Bind = { F.Visuals, "Chams" }, Swatch = { t = F.Visuals, k = "ChamColor" }, SwatchTitle = "Chams Color" })
-	Lib:Toggle(sec, { Text = "Fill", Bind = { F.Visuals, "Fill" } })
-	Lib:Slider(sec, { Label = "Thickness", Min = 1, Max = 10, Bind = { F.Visuals, "Thickness" }, Suffix = "px" })
-	Lib:Toggle(sec, { Text = "Tracers", Bind = { F.Visuals, "Tracers" }, Swatch = { t = F.Visuals, k = "TracerColor" }, SwatchTitle = "Tracer Color" })
-	Lib:Toggle(sec, { Text = "Skeleton", Bind = { F.Visuals, "Skeleton" }, Swatch = { t = F.Visuals, k = "SkeletonColor" }, SwatchTitle = "Skeleton Color" })
-	Lib:Toggle(sec, { Text = "Outline", Bind = { F.Visuals, "Outline" }, Swatch = { t = F.Visuals, k = "OutlineColor" }, SwatchTitle = "Outline Color" })
-	Lib:Dropdown(sec, { Label = "Box Type", Values = { "Corner", "Full", "Cross" }, Bind = { F.Visuals, "BoxType" } })
+	Lib:Toggle(sec, { Text = "Boxes",      Bind = { t=F.Visuals, k="Boxes" },     Cog = { t=F.Visuals, k="FillColor" }, Swatch = { t=F.Visuals, k="FillColor" }, SwatchTitle = "Fill Color" })
+	Lib:Toggle(sec, { Text = "Names",      Bind = { t=F.Visuals, k="Names" },     Keybind = { t=F.Visuals, k="NamesKey" } })
+	Lib:Toggle(sec, { Text = "Health Bar", Bind = { t=F.Visuals, k="HealthBar" }, Swatch = { t=F.Visuals, k="HealthColor" }, SwatchTitle = "Health Bar Color" })
+	Lib:Toggle(sec, { Text = "Chams",      Bind = { t=F.Visuals, k="Chams" },     Swatch = { t=F.Visuals, k="ChamColor" }, SwatchTitle = "Chams Color" })
+	Lib:Toggle(sec, { Text = "Fill",       Bind = { t=F.Visuals, k="Fill" } })
+	Lib:Slider(sec, { Label = "Thickness", Min = 1, Max = 10, Bind = { t=F.Visuals, k="Thickness" }, Suffix = "px" })
+	Lib:Toggle(sec, { Text = "Tracers",    Bind = { t=F.Visuals, k="Tracers" },   Swatch = { t=F.Visuals, k="TracerColor" }, SwatchTitle = "Tracer Color" })
+	Lib:Toggle(sec, { Text = "Skeleton",   Bind = { t=F.Visuals, k="Skeleton" },  Swatch = { t=F.Visuals, k="SkeletonColor" }, SwatchTitle = "Skeleton Color" })
+	Lib:Toggle(sec, { Text = "Outline",    Bind = { t=F.Visuals, k="Outline" },   Swatch = { t=F.Visuals, k="OutlineColor" }, SwatchTitle = "Outline Color" })
+	Lib:Dropdown(sec, { Label = "Box Type", Values = { "Corner","Full","Cross" }, Bind = { t=F.Visuals, k="BoxType" } })
 	return sec
 end
 
--- misc section (shared: combat page right column + misc tab) --------------
 function Lib.BuildMiscSection(parent)
 	local F = Lib.Flags
 	local sec = Lib:Section(parent, "Misc")
 
 	local trow = Row(sec.Body, 14)
 	Lib:IconButton(trow, "plus", function() Lib:CreateConfig(F.Misc.ConfigName) end, UDim2.fromOffset(0, 0))
-	Lib:IconButton(trow, "up", function() Lib:NudgeConfig(-1) end, UDim2.fromOffset(16, 0))
-	Lib:IconButton(trow, "down", function() Lib:NudgeConfig(1) end, UDim2.fromOffset(32, 0))
-	Lib:IconButton(trow, "left", function() Lib:CycleConfig(-1) end, UDim2.fromOffset(48, 0))
-	Lib:IconButton(trow, "right", function() Lib:CycleConfig(1) end, UDim2.fromOffset(64, 0))
+	Lib:IconButton(trow, "up",   function() Lib:NudgeConfig(-1) end,                 UDim2.fromOffset(16, 0))
+	Lib:IconButton(trow, "down", function() Lib:NudgeConfig(1) end,                  UDim2.fromOffset(32, 0))
+	Lib:IconButton(trow, "left", function() Lib:CycleConfig(-1) end,                 UDim2.fromOffset(48, 0))
+	Lib:IconButton(trow, "right",function() Lib:CycleConfig(1) end,                  UDim2.fromOffset(64, 0))
 
-	Lib:Toggle(sec, { Text = "Watermark", Bind = { F.Misc, "Watermark" }, OnChanged = function(v) Lib.SetWatermark(v) end })
-	Lib:Toggle(sec, { Text = "Keybind List", Bind = { F.Misc, "KeybindList" }, Keybind = { t = F.Binds, k = "KeybindList" }, OnChanged = function(v) Lib.SetKeybindPanel(v) end })
-	Lib:Toggle(sec, { Text = "Player List", Bind = { F.Misc, "PlayerList" }, Disabled = true, RightTag = "[SOON]" })
+	Lib:Toggle(sec, { Text = "Watermark",   Bind = { t=F.Misc, k="Watermark" },   OnChanged = function(v) Lib.SetWatermark(v) end })
+	Lib:Toggle(sec, { Text = "Keybind List",Bind = { t=F.Misc, k="KeybindList" }, Keybind = { t=F.Binds, k="KeybindList" }, OnChanged = function(v) Lib.SetKeybindPanel(v) end })
+	Lib:Toggle(sec, { Text = "Player List", Bind = { t=F.Misc, k="PlayerList" },  Disabled = true, RightTag = "[SOON]" })
 
 	Row(sec.Body, 2)
-	Lib:TextBox(sec, { Label = "Config Name", Bind = { F.Misc, "ConfigName" } })
-	Lib:Button(sec, { Text = "Legit", OnClick = function() Lib:ApplyLegitPreset() end })
+	Lib:TextBox(sec, { Label = "Config Name", Bind = { t=F.Misc, k="ConfigName" } })
+	Lib:Button(sec, { Text = "Legit",         OnClick = function() Lib:ApplyLegitPreset() end })
 	Lib:Button(sec, { Text = "Create Config", OnClick = function() Lib:CreateConfig(F.Misc.ConfigName) end })
 	Lib:ButtonRow(sec, {
-		{ Text = "Save", OnClick = function() Lib:SaveConfig(F.Misc.ConfigName) end },
-		{ Text = "Load", OnClick = function() Lib:LoadConfig(F.Misc.ConfigName) end },
+		{ Text = "Save",  OnClick = function() Lib:SaveConfig(F.Misc.ConfigName) end },
+		{ Text = "Load",  OnClick = function() Lib:LoadConfig(F.Misc.ConfigName) end },
 	})
 	Lib:ButtonRow(sec, {
-		{ Text = "Delete", OnClick = function() Lib:DeleteConfig(F.Misc.ConfigName) end },
+		{ Text = "Delete",  OnClick = function() Lib:DeleteConfig(F.Misc.ConfigName) end },
 		{ Text = "Refresh", OnClick = function() Lib:RefreshConfigs() end },
-		{ Text = "Reset", OnClick = function() Lib:ResetUI() end },
+		{ Text = "Reset",   OnClick = function() Lib:ResetUI() end },
 	})
 
 	local lrow = Row(sec.Body, 13)
@@ -1369,14 +1395,14 @@ function Lib:BuildPlayersPage(page)
 
 	local secS = Lib:Section(colR, "Selected")
 	Lib.PlayerInfo = {
-		Name = Lib:InfoRow(secS, "Name"),
+		Name    = Lib:InfoRow(secS, "Name"),
 		Display = Lib:InfoRow(secS, "Display"),
-		Uid = Lib:InfoRow(secS, "Uid"),
+		Uid     = Lib:InfoRow(secS, "Uid"),
 	}
 	Lib.PlayerControlsSec = Lib:Section(colR, "Visuals")
 	Lib:RebuildPlayerControls()
 
-	Connect(Players.PlayerAdded, function() Lib:RefreshPlayerList() end)
+	Connect(Players.PlayerAdded,   function()      Lib:RefreshPlayerList() end)
 	Connect(Players.PlayerRemoving, function(plr)
 		Lib.Flags.Players[plr.Name] = nil
 		Lib:RefreshPlayerList()
@@ -1399,7 +1425,10 @@ function Lib:RefreshPlayerList()
 	P.List:ClearAllChildren()
 	P.Rows = {}
 	New("UIListLayout", { Padding = UDim.new(0, 1), SortOrder = Enum.SortOrder.LayoutOrder, Parent = P.List })
-	New("UIPadding", { PaddingLeft = 3, PaddingRight = 4, PaddingTop = 2, PaddingBottom = 2, Parent = P.List })
+	New("UIPadding", {
+		PaddingLeft = UDim.new(0, 3), PaddingRight = UDim.new(0, 4),
+		PaddingTop = UDim.new(0, 2), PaddingBottom = UDim.new(0, 2), Parent = P.List
+	})
 	local count = 0
 	for _, plr in ipairs(Players:GetPlayers()) do
 		if plr ~= LocalPlayer then
@@ -1470,7 +1499,10 @@ function Lib:RebuildPlayerControls()
 	Lib.PlayerScope = Lib:NewScope()
 	sec.Body:ClearAllChildren()
 	New("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder, Parent = sec.Body })
-	New("UIPadding", { PaddingLeft = 3, PaddingRight = 3, PaddingTop = 2, PaddingBottom = 1, Parent = sec.Body })
+	New("UIPadding", {
+		PaddingLeft = UDim.new(0, 3), PaddingRight = UDim.new(0, 3),
+		PaddingTop = UDim.new(0, 2), PaddingBottom = UDim.new(0, 1), Parent = sec.Body
+	})
 	local plr = Lib.SelectedPlayer
 	if not plr then
 		RegisterTheme(Text({
@@ -1481,12 +1513,12 @@ function Lib:RebuildPlayerControls()
 	end
 	local pf = Lib:GetPlayerFlags(plr)
 	local scope = Lib.PlayerScope
-	Lib:Toggle(sec, { Text = "Boxes", Bind = { pf, "Boxes" }, Scope = scope })
-	Lib:Toggle(sec, { Text = "Names", Bind = { pf, "Names" }, Scope = scope })
-	Lib:Toggle(sec, { Text = "Health Bar", Bind = { pf, "HealthBar" }, Scope = scope })
-	Lib:Toggle(sec, { Text = "Tracers", Bind = { pf, "Tracers" }, Scope = scope })
-	Lib:Toggle(sec, { Text = "Chams", Bind = { pf, "Chams" }, Scope = scope })
-	Lib:Dropdown(sec, { Label = "Priority", Values = { "Lowest Health", "Closest", "Distance" }, Bind = { pf, "Priority" }, Scope = scope })
+	Lib:Toggle(sec, { Text = "Boxes",      Bind = { t=pf, k="Boxes" },     Scope = scope })
+	Lib:Toggle(sec, { Text = "Names",      Bind = { t=pf, k="Names" },     Scope = scope })
+	Lib:Toggle(sec, { Text = "Health Bar", Bind = { t=pf, k="HealthBar" }, Scope = scope })
+	Lib:Toggle(sec, { Text = "Tracers",    Bind = { t=pf, k="Tracers" },   Scope = scope })
+	Lib:Toggle(sec, { Text = "Chams",      Bind = { t=pf, k="Chams" },     Scope = scope })
+	Lib:Dropdown(sec, { Label = "Priority", Values = { "Lowest Health","Closest","Distance" }, Bind = { t=pf, k="Priority" }, Scope = scope })
 end
 
 -- settings page -----------------------------------------------------------
@@ -1496,21 +1528,21 @@ function Lib:BuildSettingsPage(page)
 	local colR = Column(page, 204, 212)
 
 	local secI = Lib:Section(colL, "Interface")
-	Lib:Slider(secI, { Label = "UI Scale", Min = 50, Max = 150, Bind = { F.Settings, "UIScale" }, Suffix = "%", OnChanged = function() Lib:ApplyScale() end })
-	Lib:Slider(secI, { Label = "UI Opacity", Min = 30, Max = 100, Bind = { F.Settings, "Opacity" }, Suffix = "%", OnChanged = function() Lib:ApplyOpacity() end })
-	Lib:Dropdown(secI, { Label = "Theme", Values = { "Dark", "Midnight", "Light" }, Bind = { F.Settings, "Theme" }, OnChanged = function(v) Lib:SetTheme(v) end })
-	Lib:ColorRow(secI, "Accent", { t = F.Settings, k = "Accent" }, "Accent Color")
+	Lib:Slider(secI, { Label = "UI Scale",   Min = 50, Max = 150, Bind = { t=F.Settings, k="UIScale" },  Suffix = "%", OnChanged = function() Lib:ApplyScale() end })
+	Lib:Slider(secI, { Label = "UI Opacity", Min = 30, Max = 100, Bind = { t=F.Settings, k="Opacity" },  Suffix = "%", OnChanged = function() Lib:ApplyOpacity() end })
+	Lib:Dropdown(secI, { Label = "Theme", Values = { "Dark","Midnight","Light" }, Bind = { t=F.Settings, k="Theme" }, OnChanged = function(v) Lib:SetTheme(v) end })
+	Lib:ColorRow(secI, "Accent", { t=F.Settings, k="Accent" }, "Accent Color")
 	Watch(F.Settings.Accent, function() Lib:SetAccent() end)
-	Lib:Toggle(secI, { Text = "Animations", Bind = { F.Settings, "Animations" } })
-	Lib:Slider(secI, { Label = "Animation Speed", Min = 0.25, Max = 2, Step = 0.05, Bind = { F.Settings, "AnimSpeed" }, Format = function(v) return string.format("%.2fx", v) end })
+	Lib:Toggle(secI, { Text = "Animations", Bind = { t=F.Settings, k="Animations" } })
+	Lib:Slider(secI, { Label = "Animation Speed", Min = 0.25, Max = 2, Step = 0.05, Bind = { t=F.Settings, k="AnimSpeed" }, Format = function(v) return string.format("%.2fx", v) end })
 
 	local secM = Lib:Section(colR, "Menu")
-	Lib:KeybindRow(secM, "Menu Key", { t = F.Binds, k = "Menu" })
-	Lib:KeybindRow(secM, "Keybind List", { t = F.Binds, k = "KeybindList" })
-	Lib:KeybindRow(secM, "Panic Key", { t = F.Binds, k = "Panic" })
+	Lib:KeybindRow(secM, "Menu Key",     { t=F.Binds, k="Menu" })
+	Lib:KeybindRow(secM, "Keybind List", { t=F.Binds, k="KeybindList" })
+	Lib:KeybindRow(secM, "Panic Key",    { t=F.Binds, k="Panic" })
 
 	local secC = Lib:Section(colR, "Config")
-	Lib:TextBox(secC, { Label = "Config Name", Bind = { F.Misc, "ConfigName" } })
+	Lib:TextBox(secC, { Label = "Config Name", Bind = { t=F.Misc, k="ConfigName" } })
 	Lib:ButtonRow(secC, {
 		{ Text = "Save UI", OnClick = function() Lib:SaveUIConfig() end },
 		{ Text = "Load UI", OnClick = function() Lib:LoadUIConfig() end },
@@ -1543,7 +1575,8 @@ function Lib:BuildColorPicker()
 	RegisterTheme(title, "BackgroundColor3", "Box")
 	local tst = New("UIStroke", { Thickness = 1, Parent = title })
 	RegisterTheme(tst, "Color", "Border")
-	Lib.PickerTitle = RegisterTheme(Text({
+	-- FIX: store as P.Title not Lib.PickerTitle so OpenColorPicker can find it
+	Lib.Picker.Title = RegisterTheme(Text({
 		BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), TextSize = 10,
 		Text = "Fill Color", Parent = title,
 	}), "TextColor3", "Text")
@@ -1579,7 +1612,8 @@ function Lib:BuildColorPicker()
 	end
 	Lib:BuildPickerSV(Lib.PickerBodies[1])
 	Lib:BuildPickerInputs(Lib.PickerBodies[1])
-	Lib.PickerAnimSec = Lib:Section(Lib.PickerBodies[2], nil, true)
+	-- FIX: store anim section as P.AnimSec
+	Lib.Picker.AnimSec = Lib:Section(Lib.PickerBodies[2], nil, true)
 	Lib:SelectPickerTab(1)
 end
 
@@ -1603,19 +1637,13 @@ function Lib:BuildPickerSV(b1)
 	})
 	local ov1 = New("Frame", { BackgroundColor3 = RGB(255, 255, 255), BorderSizePixel = 0, Size = UDim2.fromScale(1, 1), Parent = sv })
 	New("UIGradient", {
-		Transparency = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0),
-			NumberSequenceKeypoint.new(1, 1),
-		}),
+		Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 1) }),
 		Parent = ov1,
 	})
 	local ov2 = New("Frame", { BackgroundColor3 = RGB(0, 0, 0), BorderSizePixel = 0, Size = UDim2.fromScale(1, 1), Parent = sv })
 	New("UIGradient", {
 		Rotation = 90,
-		Transparency = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 1),
-			NumberSequenceKeypoint.new(1, 0),
-		}),
+		Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 0) }),
 		Parent = ov2,
 	})
 	local cursor = New("Frame", {
@@ -1705,7 +1733,7 @@ function Lib:BuildPickerInputs(b1)
 		Font = Enum.Font.Code, TextSize = 10, TextXAlignment = Enum.TextXAlignment.Left,
 		Text = "", ClearTextOnFocus = false, ClipsDescendants = true, Parent = b1,
 	}), "BackgroundColor3", "Box")
-	New("UIPadding", { PaddingLeft = 4, Parent = rgb })
+	New("UIPadding", { PaddingLeft = UDim.new(0, 4), Parent = rgb })
 	local rgbst = New("UIStroke", { Thickness = 1, Parent = rgb })
 	RegisterTheme(rgbst, "Color", "Border")
 	RegisterTheme(rgb, "TextColor3", "Text")
@@ -1717,7 +1745,7 @@ function Lib:BuildPickerInputs(b1)
 		Font = Enum.Font.Code, TextSize = 10, TextXAlignment = Enum.TextXAlignment.Left,
 		Text = "", ClearTextOnFocus = false, ClipsDescendants = true, Parent = b1,
 	}), "BackgroundColor3", "Box")
-	New("UIPadding", { PaddingLeft = 4, Parent = hex })
+	New("UIPadding", { PaddingLeft = UDim.new(0, 4), Parent = hex })
 	local hexst = New("UIStroke", { Thickness = 1, Parent = hex })
 	RegisterTheme(hexst, "Color", "Border")
 	RegisterTheme(hex, "TextColor3", "Text")
@@ -1787,12 +1815,13 @@ end
 
 function Lib:OpenColorPicker(bind, title, near)
 	local P = Lib.Picker
-	if not P.Root then return end
+	if not P or not P.Root then return end
 	local c = bind.t[bind.k]
 	if type(c) ~= "table" then return end
 	P.Target = bind
 	P.OpenId = (P.OpenId or 0) + 1
-	P.Title.Text = title or "Color"
+	-- FIX: use P.Title (stored correctly now)
+	if P.Title then P.Title.Text = title or "Color" end
 	P.H, P.S, P.V = HSVOf(c)
 	Watch(c, function()
 		local t = Lib.Picker.Target
@@ -1800,14 +1829,20 @@ function Lib:OpenColorPicker(bind, title, near)
 	end)
 	if P.AnimScope then P.AnimScope:Clear() end
 	P.AnimScope = Lib:NewScope()
+	-- FIX: use P.AnimSec (stored correctly now)
 	local sec = P.AnimSec
-	sec.Body:ClearAllChildren()
-	New("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder, Parent = sec.Body })
-	New("UIPadding", { PaddingLeft = 3, PaddingRight = 3, PaddingTop = 2, PaddingBottom = 1, Parent = sec.Body })
-	local meta = GetColorMeta(c)
-	Lib:Dropdown(sec, { Label = "Animation", Values = { "Fade", "Slide", "Instant" }, Bind = { meta, "Animation" } })
-	Lib:Dropdown(sec, { Label = "Color Animation", Values = { "Static", "Rainbow", "Pulse" }, Bind = { meta, "ColorAnimation" } })
-	Lib:Slider(sec, { Label = "Speed", Min = 0.1, Max = 5, Step = 0.1, Bind = { meta, "Speed" }, Format = function(v) return string.format("%.1fx", v) end, Scope = P.AnimScope })
+	if sec then
+		sec.Body:ClearAllChildren()
+		New("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder, Parent = sec.Body })
+		New("UIPadding", {
+			PaddingLeft = UDim.new(0, 3), PaddingRight = UDim.new(0, 3),
+			PaddingTop = UDim.new(0, 2), PaddingBottom = UDim.new(0, 1), Parent = sec.Body
+		})
+		local meta = GetColorMeta(c)
+		Lib:Dropdown(sec, { Label = "Animation", Values = { "Fade","Slide","Instant" }, Bind = { t=meta, k="Animation" } })
+		Lib:Dropdown(sec, { Label = "Color Animation", Values = { "Static","Rainbow","Pulse" }, Bind = { t=meta, k="ColorAnimation" } })
+		Lib:Slider(sec, { Label = "Speed", Min = 0.1, Max = 5, Step = 0.1, Bind = { t=meta, k="Speed" }, Format = function(v) return string.format("%.1fx", v) end, Scope = P.AnimScope })
+	end
 	Lib:PickerSyncVisuals()
 	Lib:ShowPicker(near)
 end
@@ -1846,7 +1881,7 @@ end
 
 function Lib:ClosePicker()
 	local P = Lib.Picker
-	if not P.Root or not P.Root.Visible then return end
+	if not P or not P.Root or not P.Root.Visible then return end
 	local style = "Fade"
 	if P.Target then
 		style = GetColorMeta(P.Target.t[P.Target.k]).Animation or "Fade"
@@ -1863,7 +1898,7 @@ function Lib:ClosePicker()
 	end
 end
 
--- animated colors (rainbow / pulse) ---------------------------------------
+-- animated colors ---------------------------------------------------------
 BindConn(RunService.Heartbeat:Connect(function(dt)
 	for c, meta in pairs(Lib.ColorMetas) do
 		local anim = meta.ColorAnimation
@@ -1915,16 +1950,17 @@ function Lib:BuildKeybindPanel()
 		BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 15),
 		Size = UDim2.new(1, 0, 1, -15), Parent = root,
 	})
+	local F = Lib.Flags
 	local entries = {
-		{ "Menu", { t = Lib.Flags.Binds, k = "Menu" } },
-		{ "Aimbot", { t = Lib.Flags.Aimbot, k = "Key" } },
-		{ "Silent Aim", { t = Lib.Flags.Aimbot, k = "SilentKey" } },
-		{ "Triggerbot", { t = Lib.Flags.Triggerbot, k = "Key" } },
-		{ "Keybind List", { t = Lib.Flags.Binds, k = "KeybindList" } },
-		{ "Peek Assist", { t = Lib.Flags.Binds, k = "PeekAssist" } },
-		{ "Speed", { t = Lib.Flags.Binds, k = "Speed" } },
-		{ "Fly", { t = Lib.Flags.Binds, k = "Fly" } },
-		{ "Panic Key", { t = Lib.Flags.Binds, k = "Panic" } },
+		{ "Menu",         { t=F.Binds,      k="Menu" } },
+		{ "Aimbot",       { t=F.Aimbot,     k="Key" } },
+		{ "Silent Aim",   { t=F.Aimbot,     k="SilentKey" } },
+		{ "Triggerbot",   { t=F.Triggerbot, k="Key" } },
+		{ "Keybind List", { t=F.Binds,      k="KeybindList" } },
+		{ "Peek Assist",  { t=F.Binds,      k="PeekAssist" } },
+		{ "Speed",        { t=F.Binds,      k="Speed" } },
+		{ "Fly",          { t=F.Binds,      k="Fly" } },
+		{ "Panic Key",    { t=F.Binds,      k="Panic" } },
 	}
 	for i, e in ipairs(entries) do
 		local row = LO(New("TextButton", {
@@ -1975,7 +2011,7 @@ function Lib:BuildWatermark()
 		Position = UDim2.fromOffset(0, 20), AutomaticSize = Enum.AutomaticSize.X,
 		Size = UDim2.fromOffset(0, 13), Parent = holder,
 	})
-	New("UIPadding", { PaddingLeft = 4, PaddingRight = 4, Parent = bar })
+	New("UIPadding", { PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 4), Parent = bar })
 	Lib.WatermarkText = RegisterTheme(Text({
 		BackgroundTransparency = 1, AutomaticSize = Enum.AutomaticSize.X,
 		Size = UDim2.fromOffset(0, 13), TextSize = 9, TextXAlignment = Enum.TextXAlignment.Left,
@@ -1999,11 +2035,9 @@ local CONFIG_DIR = "momohax_configs"
 local function Sanitize(name)
 	return (tostring(name or ""):gsub("[^%w%-_ ]", ""))
 end
-
 local function ConfigPath(name)
 	return CONFIG_DIR .. "/" .. Sanitize(name) .. ".json"
 end
-
 local function EnsureDir()
 	if FSOk and not isfolder(CONFIG_DIR) then pcall(makefolder, CONFIG_DIR) end
 end
@@ -2099,7 +2133,6 @@ function Lib:CycleConfig(dir)
 	Emit(Lib.Flags.Misc)
 end
 
--- UI config (settings + binds) --------------------------------------------
 function Lib:SaveUIConfig()
 	local name = Sanitize(Lib.Flags.Misc.ConfigName)
 	if name == "" then name = "ui" end
@@ -2116,7 +2149,7 @@ function Lib:LoadUIConfig()
 	if not payload then return end
 	if type(payload) == "table" then
 		if payload.Settings then MergeInto(Lib.Flags.Settings, payload.Settings) end
-		if payload.Binds then MergeInto(Lib.Flags.Binds, payload.Binds) end
+		if payload.Binds   then MergeInto(Lib.Flags.Binds,    payload.Binds)    end
 	end
 	Lib:AfterFlagsRestore()
 end
